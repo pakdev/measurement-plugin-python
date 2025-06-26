@@ -165,170 +165,42 @@ def frame_metadata_dict(
     return metadata_dict
 
 
-class MeasurementServiceServicerV1(v1_measurement_service_pb2_grpc.MeasurementServiceServicer):
-    """Measurement v1 servicer."""
+class MeasurementServiceServicerV3(v3_measurement_service_pb2_grpc.MeasurementServiceServicer):
+    """Measurement v3 servicer."""
 
     def __init__(
         self,
         measurement_info: MeasurementInfo,
         configuration_parameter_list: list[ParameterMetadata],
-        output_parameter_list: list[ParameterMetadata],
+        input_parameters: dict[str, str],
+        output_parameters: dict[str, str],
         measure_function: Callable,
         owner: object,
         service_info: ServiceInfo,
     ) -> None:
-        """Initialize the measurement v1 servicer."""
+        """Initialize the measurement v3 servicer."""
         super().__init__()
         self._configuration_metadata = frame_metadata_dict(configuration_parameter_list)
-        self._output_metadata = frame_metadata_dict(output_parameter_list)
         self._measurement_info = measurement_info
         self._measure_function = measure_function
         self._owner = weakref.ref(owner) if owner is not None else None  # avoid reference cycle
         self._service_info = service_info
         self._configuration_parameters_message_type = service_info.service_class + ".Configurations"
-        self._outputs_message_type = service_info.service_class + ".Outputs"
 
     def GetMetadata(  # noqa: N802 - function name should be lowercase
-        self, request: v1_measurement_service_pb2.GetMetadataRequest, context: grpc.ServicerContext
-    ) -> v1_measurement_service_pb2.GetMetadataResponse:
-        """RPC API to get measurement metadata."""
-        measurement_details = v1_measurement_service_pb2.MeasurementDetails(
-            display_name=self._measurement_info.display_name, version=self._measurement_info.version
-        )
-
-        measurement_signature = v1_measurement_service_pb2.MeasurementSignature(
-            configuration_parameters_message_type=self._configuration_parameters_message_type,
-            outputs_message_type=self._outputs_message_type,
-        )
-
-        for field_number, configuration_metadata in self._configuration_metadata.items():
-            configuration_parameter = v1_measurement_service_pb2.ConfigurationParameter(
-                field_number=field_number,
-                name=configuration_metadata.display_name,
-                repeated=configuration_metadata.repeated,
-                type=configuration_metadata.type,
-                annotations=configuration_metadata.annotations,
-            )
-            measurement_signature.configuration_parameters.append(configuration_parameter)
-
-        measurement_signature.configuration_defaults.value = encoder.serialize_default_values(
-            self._configuration_metadata, self._configuration_parameters_message_type
-        )
-
-        for field_number, output_metadata in self._output_metadata.items():
-            output_parameter = v1_measurement_service_pb2.Output(
-                field_number=field_number,
-                name=output_metadata.display_name,
-                type=output_metadata.type,
-                repeated=output_metadata.repeated,
-            )
-            measurement_signature.outputs.append(output_parameter)
-
-        metadata_response = v1_measurement_service_pb2.GetMetadataResponse(
-            measurement_details=measurement_details,
-            measurement_signature=measurement_signature,
-            user_interface_details=None,
-        )
-
-        for ui_file_path in self._measurement_info.ui_file_paths:
-            ui_details = v1_measurement_service_pb2.UserInterfaceDetails(
-                file_url=pathlib.Path(ui_file_path).as_uri()
-            )
-            metadata_response.user_interface_details.append(ui_details)
-
-        return metadata_response
-
-    def Measure(  # noqa: N802 - function name should be lowercase
-        self, request: v1_measurement_service_pb2.MeasureRequest, context: grpc.ServicerContext
-    ) -> v1_measurement_service_pb2.MeasureResponse:
-        """RPC API that executes the registered measurement method."""
-        self._validate_parameters(request)
-        mapping_by_id = decoder.deserialize_parameters(
-            self._configuration_metadata,
-            request.configuration_parameters.value,
-            self._configuration_parameters_message_type,
-        )
-        mapping_by_variable_name = _get_mapping_by_parameter_name(
-            mapping_by_id, self._measure_function
-        )
-        pin_map_context = PinMapContext._from_grpc(request.pin_map_context)
-        token = measurement_service_context.set(
-            MeasurementServiceContext(context, pin_map_context, self._owner)
-        )
-        try:
-            return_value = self._measure_function(**mapping_by_variable_name)
-            if isinstance(return_value, collections.abc.Generator):
-                with contextlib.closing(return_value) as output_iter:
-                    outputs = None
-                    try:
-                        while True:
-                            outputs = next(output_iter)
-                    except StopIteration as e:
-                        if e.value is not None:
-                            outputs = e.value
-                    return self._serialize_response(outputs)
-            else:
-                return self._serialize_response(return_value)
-        finally:
-            measurement_service_context.get().mark_complete()
-            measurement_service_context.reset(token)
-
-    def _serialize_response(
-        self,
-        outputs: Any,
-    ) -> v1_measurement_service_pb2.MeasureResponse:
-        return v1_measurement_service_pb2.MeasureResponse(
-            outputs=_serialize_outputs(self._output_metadata, outputs, self._outputs_message_type)
-        )
-
-    def _validate_parameters(self, request: v1_measurement_service_pb2.MeasureRequest) -> None:
-        expected_type = "type.googleapis.com/" + self._configuration_parameters_message_type
-        actual_type = request.configuration_parameters.type_url
-        if actual_type != expected_type:
-            warnings.warn(
-                f"Wrong message type. Expected {expected_type!r} but got {actual_type!r}",
-                WrongMessageTypeWarning,
-            )
-
-
-class MeasurementServiceServicerV2(v2_measurement_service_pb2_grpc.MeasurementServiceServicer):
-    """Measurement v2 servicer."""
-
-    def __init__(
-        self,
-        measurement_info: MeasurementInfo,
-        configuration_parameter_list: list[ParameterMetadata],
-        output_parameter_list: list[ParameterMetadata],
-        measure_function: Callable,
-        owner: object,
-        service_info: ServiceInfo,
-    ) -> None:
-        """Initialize the measurement v2 servicer."""
-        super().__init__()
-        self._configuration_metadata = frame_metadata_dict(configuration_parameter_list)
-        self._output_metadata = frame_metadata_dict(output_parameter_list)
-        self._measurement_info = measurement_info
-        self._measure_function = measure_function
-        self._owner = weakref.ref(owner) if owner is not None else None  # avoid reference cycle
-        self._service_info = service_info
-        self._configuration_parameters_message_type = service_info.service_class + ".Configurations"
-        self._outputs_message_type = service_info.service_class + ".Outputs"
-
-    def GetMetadata(  # noqa: N802 - function name should be lowercase
-        self, request: v2_measurement_service_pb2.GetMetadataRequest, context: grpc.ServicerContext
+        self, request: v3_measurement_service_pb2.GetMetadataRequest, context: grpc.ServicerContext
     ) -> v2_measurement_service_pb2.GetMetadataResponse:
         """RPC API to get measurement metadata."""
-        measurement_details = v2_measurement_service_pb2.MeasurementDetails(
+        measurement_details = v3_measurement_service_pb2.MeasurementDetails(
             display_name=self._measurement_info.display_name, version=self._measurement_info.version
         )
 
-        measurement_signature = v2_measurement_service_pb2.MeasurementSignature(
+        measurement_signature = v3_measurement_service_pb2.MeasurementSignature(
             configuration_parameters_message_type=self._configuration_parameters_message_type,
-            outputs_message_type=self._outputs_message_type,
         )
 
         for field_number, configuration_metadata in self._configuration_metadata.items():
-            configuration_parameter = v2_measurement_service_pb2.ConfigurationParameter(
+            configuration_parameter = v3_measurement_service_pb2.ConfigurationParameter(
                 field_number=field_number,
                 name=configuration_metadata.display_name,
                 repeated=configuration_metadata.repeated,
@@ -342,18 +214,18 @@ class MeasurementServiceServicerV2(v2_measurement_service_pb2_grpc.MeasurementSe
             self._configuration_metadata, self._configuration_parameters_message_type
         )
 
-        for field_number, output_metadata in self._output_metadata.items():
-            output_parameter = v2_measurement_service_pb2.Output(
-                field_number=field_number,
-                name=output_metadata.display_name,
-                type=output_metadata.type,
-                repeated=output_metadata.repeated,
-                annotations=output_metadata.annotations,
-                message_type=output_metadata.message_type,
-            )
-            measurement_signature.outputs.append(output_parameter)
+        # for field_number, output_metadata in self._output_metadata.items():
+        #     output_parameter = v2_measurement_service_pb2.Output(
+        #         field_number=field_number,
+        #         name=output_metadata.display_name,
+        #         type=output_metadata.type,
+        #         repeated=output_metadata.repeated,
+        #         annotations=output_metadata.annotations,
+        #         message_type=output_metadata.message_type,
+        #     )
+        #     measurement_signature.outputs.append(output_parameter)
 
-        metadata_response = v2_measurement_service_pb2.GetMetadataResponse(
+        metadata_response = v3_measurement_service_pb2.GetMetadataResponse(
             measurement_details=measurement_details,
             measurement_signature=measurement_signature,
             user_interface_details=None,

@@ -41,6 +41,7 @@ from ni_measurement_plugin_sdk_service.grpc.channelpool import (  # re-export
 from ni_measurement_plugin_sdk_service.measurement.info import (
     DataType,
     MeasurementInfo,
+    MonikerType,
     ServiceInfo,
     TypeSpecialization,
 )
@@ -259,7 +260,8 @@ class MeasurementService:
         """Accessor for context-local state."""
 
         self._configuration_parameter_list: list[parameter_metadata.ParameterMetadata] = []
-        self._output_parameter_list: list[parameter_metadata.ParameterMetadata] = []
+        self._input_parameter_list: dict[str, str] = {}
+        self._output_parameter_list: dict[str, str] = {}
         self._measure_function: Callable = self._raise_measurement_method_not_registered
 
         self._initialization_lock = threading.RLock()
@@ -290,42 +292,6 @@ class MeasurementService:
                 if self._discovery_client is None:
                     self._discovery_client = DiscoveryClient(grpc_channel_pool=self.channel_pool)
         return self._discovery_client
-
-    @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="This property should not be public and will be removed in a later release.",
-    )
-    def configuration_parameter_list(self) -> list[Any]:
-        """List of configuration parameters."""
-        return self._configuration_parameter_list
-
-    @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="This property should not be public and will be removed in a later release.",
-    )
-    def grpc_service(self) -> GrpcService | None:
-        """The gRPC service object. This is a private implementation detail."""
-        return self._grpc_service
-
-    @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="This property should not be public and will be removed in a later release.",
-    )
-    def measure_function(self) -> Callable:
-        """Registered measurement function."""
-        return self._measure_function
-
-    @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="This property should not be public and will be removed in a later release.",
-    )
-    def output_parameter_list(self) -> list[Any]:
-        """List of output parameters."""
-        return self._output_parameter_list
 
     @property
     def service_location(self) -> ServiceLocation:
@@ -447,13 +413,35 @@ class MeasurementService:
 
         return _configuration
 
-    def output(
-        self,
-        display_name: str,
-        type: DataType,
-        *,
-        enum_type: SupportedEnumType | None = None,
-    ) -> Callable[[_F], _F]:
+    def input(self, display_name: str, type: MonikerType) -> Callable[[_F], _F]:
+        """Add an input parameter to a measurement function.
+
+        This decorator maps the measurement service's input parameters to
+        the elements of the tuple passed to the measurement function.
+        To add multiple input parameters to the same measurement function,
+        use this decorator multiple times.
+        The order of decorator calls must match the order of elements
+        passed to the measurement function.
+
+        See also: :func:`.register_measurement`
+
+        Args:
+            display_name: Display name of the input.
+
+            type: Data type of the input.
+
+        Returns:
+            Callable that takes in Any Python Function and
+            returns the same python function.
+        """
+        self._input_parameter_list[display_name] = type.to_url()
+
+        def _input(func: _F) -> _F:
+            return func
+
+        return _input
+
+    def output(self, display_name: str, type: MonikerType) -> Callable[[_F], _F]:
         """Add an output parameter to a measurement function.
 
         This decorator maps the measurement service's output parameters to
@@ -470,37 +458,11 @@ class MeasurementService:
 
             type: Data type of the output.
 
-            enum_type:
-                Defines the enum type associated with this configuration parameter. This is only
-                supported when configuration type is DataType.Enum or DataType.EnumArray1D.
-
         Returns:
             Callable that takes in Any Python Function and
             returns the same python function.
         """
-        if type == DataType.Pin:
-            warnings.warn(
-                "DataType.Pin is deprecated. Use DataType.IOResource instead.", DeprecationWarning
-            )
-        if type == DataType.PinArray1D:
-            warnings.warn(
-                "DataType.PinArray1D is deprecated. Use DataType.IOResourceArray1D instead.",
-                DeprecationWarning,
-            )
-        data_type_info = _datatypeinfo.get_type_info(type)
-        annotations = self._make_annotations_dict(
-            data_type_info.type_specialization, enum_type=enum_type
-        )
-        parameter = parameter_metadata.ParameterMetadata.initialize(
-            display_name,
-            data_type_info.grpc_field_type,
-            data_type_info.repeated,
-            None,
-            annotations,
-            data_type_info.message_type,
-            enum_type,
-        )
-        self._output_parameter_list.append(parameter)
+        self._output_parameter_list[display_name] = type.to_url()
 
         def _output(func: _F) -> _F:
             return func

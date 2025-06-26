@@ -4,7 +4,6 @@ import logging
 from typing import Callable
 
 import grpc
-from deprecation import deprecated
 from google.protobuf import descriptor_pool
 from grpc.framework.foundation import logging_pool
 
@@ -32,8 +31,7 @@ from ni_measurement_plugin_sdk_service.measurement.info import (
 )
 
 _logger = logging.getLogger(__name__)
-_V1_INTERFACE = "ni.measurementlink.measurement.v1.MeasurementService"
-_V2_INTERFACE = "ni.measurementlink.measurement.v2.MeasurementService"
+_V3_INTERFACE = "ni.measurementlink.measurement.v3.MeasurementService"
 
 
 class GrpcService:
@@ -47,33 +45,6 @@ class GrpcService:
         self._registration_id = ""
 
     @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="This property should not be public and will be removed in a later release.",
-    )
-    def discovery_client(self) -> DiscoveryClient:
-        """Client for accessing the NI Discovery Service."""
-        return self._discovery_client
-
-    @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="Use service_location instead.",
-    )
-    def port(self) -> str:
-        """The insecure port."""
-        return self.service_location.insecure_port
-
-    @property
-    @deprecated(
-        deprecated_in="1.3.0-dev0",
-        details="This property should not be public and will be removed in a later release.",
-    )
-    def server(self) -> grpc.Server | None:
-        """The gRPC server."""
-        return self._server
-
-    @property
     def service_location(self) -> ServiceLocation:
         """The location of the service on the network."""
         if self._service_location is None:
@@ -85,7 +56,8 @@ class GrpcService:
         measurement_info: MeasurementInfo,
         service_info: ServiceInfo,
         configuration_parameter_list: list[ParameterMetadata],
-        output_parameter_list: list[ParameterMetadata],
+        input_parameters: dict[str, str],
+        output_parameters: dict[str, str],
         measure_function: Callable,
         owner: object = None,
     ) -> str:
@@ -107,34 +79,22 @@ class GrpcService:
         )
         create_file_descriptor(
             service_name=service_info.service_class,
-            output_metadata=output_parameter_list,
-            input_metadata=configuration_parameter_list,
+            config_metadata=configuration_parameter_list,
             pool=descriptor_pool.Default(),
         )
         for interface in service_info.provided_interfaces:
-            if interface == _V1_INTERFACE:
-                servicer_v1 = MeasurementServiceServicerV1(
+            if interface == _V3_INTERFACE:
+                servicer_v3 = MeasurementServiceServicerV3(
                     measurement_info,
                     configuration_parameter_list,
-                    output_parameter_list,
-                    measure_function,
-                    owner,
-                    service_info,
-                )
-                v1_measurement_service_pb2_grpc.add_MeasurementServiceServicer_to_server(
-                    servicer_v1, self._server
-                )
-            elif interface == _V2_INTERFACE:
-                servicer_v2 = MeasurementServiceServicerV2(
-                    measurement_info,
-                    configuration_parameter_list,
-                    output_parameter_list,
+                    input_parameters,
+                    output_parameters,
                     measure_function,
                     owner,
                     service_info,
                 )
                 v2_measurement_service_pb2_grpc.add_MeasurementServiceServicer_to_server(
-                    servicer_v2, self._server
+                    servicer_v3, self._server
                 )
             else:
                 raise ValueError(
