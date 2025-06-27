@@ -8,8 +8,7 @@ from google.protobuf import descriptor_pool
 from grpc.framework.foundation import logging_pool
 
 from ni_measurement_plugin_sdk_service._internal.grpc_servicer import (
-    MeasurementServiceServicerV1,
-    MeasurementServiceServicerV2,
+    MeasurementServiceServicerV3,
 )
 from ni_measurement_plugin_sdk_service._internal.parameter.metadata import (
     ParameterMetadata,
@@ -17,11 +16,8 @@ from ni_measurement_plugin_sdk_service._internal.parameter.metadata import (
 from ni_measurement_plugin_sdk_service._internal.parameter.serialization_descriptors import (
     create_file_descriptor,
 )
-from ni_measurement_plugin_sdk_service._internal.stubs.ni.measurementlink.measurement.v1 import (
-    measurement_service_pb2_grpc as v1_measurement_service_pb2_grpc,
-)
-from ni_measurement_plugin_sdk_service._internal.stubs.ni.measurementlink.measurement.v2 import (
-    measurement_service_pb2_grpc as v2_measurement_service_pb2_grpc,
+from ni_measurement_plugin_sdk_service._internal.stubs.ni.measurementlink.measurement.v3 import (
+    measurement_service_pb2_grpc as v3_measurement_service_pb2_grpc,
 )
 from ni_measurement_plugin_sdk_service.discovery import DiscoveryClient, ServiceLocation
 from ni_measurement_plugin_sdk_service.grpc.loggers import ServerLogger
@@ -40,7 +36,7 @@ class GrpcService:
     def __init__(self, discovery_client: DiscoveryClient | None = None) -> None:
         """Initialize the service."""
         self._discovery_client = discovery_client or DiscoveryClient()
-        self._server: grpc.Server | None = None
+        self._server: grpc.aio.Server | None = None
         self._service_location: ServiceLocation | None = None
         self._registration_id = ""
 
@@ -51,7 +47,7 @@ class GrpcService:
             raise RuntimeError("Measurement service not running")
         return self._service_location
 
-    def start(
+    async def start(
         self,
         measurement_info: MeasurementInfo,
         service_info: ServiceInfo,
@@ -69,7 +65,7 @@ class GrpcService:
         interceptors: list[grpc.ServerInterceptor] = []
         if ServerLogger.is_enabled():
             interceptors.append(ServerLogger())
-        self._server = grpc.server(
+        self._server = grpc.aio.server(
             logging_pool.pool(max_workers=10),
             interceptors=interceptors,
             options=[
@@ -93,7 +89,7 @@ class GrpcService:
                     owner,
                     service_info,
                 )
-                v2_measurement_service_pb2_grpc.add_MeasurementServiceServicer_to_server(
+                v3_measurement_service_pb2_grpc.add_MeasurementServiceServicer_to_server(
                     servicer_v3, self._server
                 )
             else:
@@ -103,7 +99,7 @@ class GrpcService:
         host = "[::1]"
         port = str(self._server.add_insecure_port(f"{host}:0"))
         address = f"http://{host}:{port}"
-        self._server.start()
+        await self._server.start()
         _logger.info("Measurement service listening on: %s", address)
 
         self._service_location = ServiceLocation("localhost", port, "")
@@ -112,12 +108,12 @@ class GrpcService:
         )
         return port
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Unregister and stop the gRPC server."""
         if self._registration_id:
             self._discovery_client.unregister_service(self._registration_id)
         if self._server is not None:
-            self._server.stop(5)
+            await self._server.stop(5)
 
         self._registration_id = ""
         self._server = None

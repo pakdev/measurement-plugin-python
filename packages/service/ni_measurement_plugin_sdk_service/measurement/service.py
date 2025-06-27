@@ -469,7 +469,7 @@ class MeasurementService:
 
         return _output
 
-    def host_service(self) -> MeasurementService:
+    async def host_service(self) -> MeasurementService:
         """Host the registered measurement method as a gRPC measurement service.
 
         Returns:
@@ -486,7 +486,7 @@ class MeasurementService:
                 raise RuntimeError("Measurement service already running.")
 
             self._grpc_service = GrpcService(self.discovery_client)
-            self._grpc_service.start(
+            await self._grpc_service.start(
                 self.measurement_info,
                 self.service_info,
                 self._configuration_parameter_list,
@@ -543,7 +543,7 @@ class MeasurementService:
         # google.protobuf.internal.
         return isinstance(getattr(enum_type, "DESCRIPTOR", None), EnumDescriptor)
 
-    def close_service(self) -> None:
+    async def close_service(self) -> None:
         """Stop the gRPC measurement service.
 
         This method stops the gRPC server, unregisters with the discovery service, and cleans up
@@ -555,29 +555,29 @@ class MeasurementService:
         """
         with self._initialization_lock:
             if self._grpc_service is not None:
-                self._grpc_service.stop()
+                await self._grpc_service.stop()
             if self._channel_pool is not None:
-                self._channel_pool.close()
+                await self._channel_pool.close()
 
             self._grpc_service = None
             self._channel_pool = None
             self._discovery_client = None
 
-    def __enter__(self: Self) -> Self:
+    async def __aenter__(self: Self) -> Self:
         """Enter the runtime context related to the measurement service."""
         return self
 
-    def __exit__(
+    async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         traceback: TracebackType | None,
     ) -> Literal[False]:
         """Exit the runtime context related to the measurement service."""
-        self.close_service()
+        await self.close_service()
         return False
 
-    def get_channel(self, provided_interface: str, service_class: str = "") -> grpc.Channel:
+    async def get_channel(self, provided_interface: str, service_class: str = "") -> grpc.Channel:
         """Return gRPC channel to specified service.
 
         Args:
@@ -593,4 +593,5 @@ class MeasurementService:
                 registered.
         """
         service_location = self.discovery_client.resolve_service(provided_interface, service_class)
-        return self.channel_pool.get_channel(service_location.insecure_address)
+        channel = await self.channel_pool.get_channel(service_location.insecure_address)
+        return channel

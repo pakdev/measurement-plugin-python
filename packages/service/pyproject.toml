@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.11, <3.14"
 # This package includes gRPC stubs that were generated with the version of grpcio-tools specified
 # below. Please keep the minimum grpcio version in sync with the grpcio-tools version. Otherwise,
 # the generated gRPC stubs may not work with the minimum grpcio version.
@@ -92,6 +92,7 @@ numpy = [
 bandit = { version = ">=1.7", extras = ["toml"] }
 # Install traceloggingdynamic on Linux for type checking.
 traceloggingdynamic = { version = ">=1.0", platform = "linux" }
+ipython = "^9.3.0"
 
 [tool.poetry.group.docs]
 optional = true

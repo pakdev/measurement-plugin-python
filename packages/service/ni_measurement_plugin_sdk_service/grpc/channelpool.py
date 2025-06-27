@@ -29,21 +29,21 @@ class GrpcChannelPool:
         self._lock: Lock = Lock()
         self._channel_cache: dict[str, grpc.Channel] = {}
 
-    def __enter__(self: Self) -> Self:
+    async def __aenter__(self: Self) -> Self:
         """Enter the runtime context of the GrpcChannelPool."""
         return self
 
-    def __exit__(
+    async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         traceback: TracebackType | None,
     ) -> Literal[False]:
         """Exit the runtime context of the GrpcChannelPool."""
-        self.close()
+        await self.close()
         return False
 
-    def get_channel(self, target: str) -> grpc.Channel:
+    async def get_channel(self, target: str) -> grpc.Channel:
         """Return a gRPC channel.
 
         Args:
@@ -54,7 +54,7 @@ class GrpcChannelPool:
         with self._lock:
             if target not in self._channel_cache:
                 self._lock.release()
-                new_channel = self._create_channel(target)
+                new_channel = await self._create_channel(target)
                 self._lock.acquire()
                 if target not in self._channel_cache:
                     self._channel_cache[target] = new_channel
@@ -63,25 +63,26 @@ class GrpcChannelPool:
 
         # Close new_channel if it was not stored in _channel_cache.
         if new_channel is not None:
-            new_channel.close()
+            await new_channel.close()
 
         return channel
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close channels opened by get_channel()."""
         with self._lock:
             for channel in self._channel_cache.values():
-                channel.close()
+                await channel.close()
             self._channel_cache.clear()
 
-    def _create_channel(self, target: str) -> grpc.Channel:
+    async def _create_channel(self, target: str) -> grpc.Channel:
         options = [
             ("grpc.max_receive_message_length", -1),
             ("grpc.max_send_message_length", -1),
         ]
         if self._is_local(target):
             options.append(("grpc.enable_http_proxy", 0))
-        channel = grpc.insecure_channel(target, options)
+        channel = grpc.aio.insecure_channel(target, options)
+        await channel.channel_ready()
         if ClientLogger.is_enabled():
             channel = grpc.intercept_channel(channel, ClientLogger())
         return channel
